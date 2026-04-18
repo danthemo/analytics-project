@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-market_ratings}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-market_ratings}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  analysis-service:
+    build:
+      context: ./analysis-service
+    container_name: analysis-service
+    restart: unless-stopped
+    environment:
+      APP_NAME: analysis-service
+      APP_PORT: 8000
+      MODEL_DIR: /app/artifacts/model
+    ports:
+      - "${ANALYSIS_SERVICE_PORT:-8000}:8000"
+    volumes:
+      - ./analysis-service/artifacts:/app/artifacts
+
+  rating-service:
+    build:
+      context: ./rating-service
+    container_name: rating-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      analysis-service:
+        condition: service_started
+    environment:
+      APP_NAME: rating-service
+      HTTP_PORT: 8080
+      ANALYSIS_SERVICE_URL: ${ANALYSIS_SERVICE_URL:-http://analysis-service:8000}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-market_ratings}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_SSLMODE: disable
+    ports:
+      - "${RATING_SERVICE_PORT:-8080}:8080"
+
+volumes:
+  postgres-data:

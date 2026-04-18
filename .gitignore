@@ -1,0 +1,13 @@
+.env
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.idea/
+.vscode/
+analysis-service/artifacts/model/
+analysis-service/artifacts/checkpoints/
+rating-service/bin/
+rating-service/.gocache/
+rating-service/.gomodcache/
