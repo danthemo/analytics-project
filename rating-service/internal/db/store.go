@@ -233,7 +233,7 @@ func (s *Store) SaveProductArtifacts(ctx context.Context, response domain.Produc
 
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "product_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"reviews_count", "avg_score", "rating_10", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"reviews_count", "avg_score", "rating10", "updated_at"}),
 		}).Create(&rating).Error; err != nil {
 			return err
 		}

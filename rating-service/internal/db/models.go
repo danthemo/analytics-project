@@ -50,7 +50,7 @@ type ProductRating struct {
 	ProductID    int64     `gorm:"uniqueIndex;not null"`
 	ReviewsCount int       `gorm:"not null"`
 	AvgScore     float64   `gorm:"type:numeric(4,2);not null"`
-	Rating10     float64   `gorm:"type:numeric(4,2);not null;index"`
+	Rating10     float64   `gorm:"column:rating10;type:numeric(4,2);not null;index"`
 	UpdatedAt    time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
 	Product      Product   `gorm:"foreignKey:ProductID;constraint:OnDelete:CASCADE"`
 }
