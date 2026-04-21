@@ -107,8 +107,6 @@ python training/train.py --data-path /absolute/path/to/dataset.csv --output-dir 
 analysis-service/artifacts/model
 ```
 
-Для длинного обучения на `RTX 4070` текущий pipeline уже настроен на более “боевой” режим:
-
 - mixed precision автоматически включается на CUDA;
 - включен cosine scheduler с warmup;
 - включен gradient checkpointing;
@@ -122,6 +120,8 @@ analysis-service/artifacts/model
 ```bash
 python training/train.py --data-path /absolute/path/to/dataset.csv --output-dir artifacts/model --resume-from-latest
 ```
+
+[Обученная модель](https://drive.google.com/drive/folders/1WsYNUQX5_EES5zKNpJnGMhkHeOn77zUb?usp=sharing)
 
 ## 3. Запуск сервисов
 
