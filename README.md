@@ -91,7 +91,7 @@ text,label,src
 - `1 -> positive`
 - `2 -> negative`
 
-### Вариант A: локально через Python
+локально через Python
 
 ```bash
 cd analysis-service
