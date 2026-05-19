@@ -5,13 +5,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY analysis-service/requirements.txt ./requirements.txt
+COPY catalog-service/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY shared ./shared
-COPY analysis-service/app ./app
-COPY analysis-service/training ./training
-COPY analysis-service/artifacts ./artifacts
+COPY shared /app/shared
+COPY catalog-service/app /app/app
 
 EXPOSE 8000
 

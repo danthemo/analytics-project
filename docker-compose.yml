@@ -4,7 +4,7 @@ services:
     container_name: postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-market_ratings}
+      POSTGRES_DB: ${POSTGRES_DB:-reviews_platform}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
@@ -12,22 +12,70 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-market_ratings}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-reviews_platform}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  catalog-service:
+    build:
+      context: .
+      dockerfile: catalog-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-reviews_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${CATALOG_SERVICE_PORT:-8001}:8000"
+
+  review-service:
+    build:
+      context: .
+      dockerfile: review-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      catalog-service:
+        condition: service_started
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-reviews_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${REVIEW_SERVICE_PORT:-8002}:8000"
+
   analysis-service:
     build:
-      context: ./analysis-service
-    container_name: analysis-service
+      context: .
+      dockerfile: analysis-service/Dockerfile
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      review-service:
+        condition: service_started
     environment:
       APP_NAME: analysis-service
       APP_PORT: 8000
       MODEL_DIR: /app/artifacts/model
+      REVIEW_SERVICE_URL: ${REVIEW_SERVICE_URL:-http://review-service:8000}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-reviews_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
     ports:
-      - "${ANALYSIS_SERVICE_PORT:-8000}:8000"
+      - "${ANALYSIS_SERVICE_PORT:-8003}:8000"
     volumes:
       - ./analysis-service/artifacts:/app/artifacts
     healthcheck:
@@ -38,42 +86,33 @@ services:
 
   rating-service:
     build:
-      context: ./rating-service
-    container_name: rating-service
+      context: .
+      dockerfile: rating-service/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
       analysis-service:
-        condition: service_healthy
+        condition: service_started
     environment:
-      APP_NAME: rating-service
-      HTTP_PORT: 8080
-      ANALYSIS_SERVICE_URL: ${ANALYSIS_SERVICE_URL:-http://analysis-service:8000}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-market_ratings}
-      DB_USER: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      DB_SSLMODE: disable
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-reviews_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${RATING_SERVICE_PORT:-8080}:8080"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
+      - "${RATING_SERVICE_PORT:-8004}:8000"
 
   ozon-parser:
     build:
       context: .
       dockerfile: python/Dockerfile
-    container_name: ozon-parser
+    profiles: ["parsers"]
     restart: unless-stopped
     shm_size: "1gb"
     command: ["xvfb-run", "-a", "uvicorn", "main_ozon:app", "--host", "0.0.0.0", "--port", "8001"]
     ports:
-      - "${OZON_PARSER_PORT:-8001}:8001"
+      - "${OZON_PARSER_PORT:-8006}:8001"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/openapi.json', timeout=5)"]
       interval: 20s
@@ -84,12 +123,12 @@ services:
     build:
       context: .
       dockerfile: python/Dockerfile
-    container_name: yandex-market-parser
+    profiles: ["parsers"]
     restart: unless-stopped
     shm_size: "1gb"
     command: ["uvicorn", "ya_parse:app", "--host", "0.0.0.0", "--port", "8002"]
     ports:
-      - "${YANDEX_MARKET_PARSER_PORT:-8002}:8002"
+      - "${YANDEX_MARKET_PARSER_PORT:-8007}:8002"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/openapi.json', timeout=5)"]
       interval: 20s
@@ -98,27 +137,45 @@ services:
 
   collector-service:
     build:
-      context: ./collector-service
-    container_name: collector-service
+      context: .
+      dockerfile: collector-service/Dockerfile
     restart: unless-stopped
-    depends_on:
-      ozon-parser:
-        condition: service_healthy
-      yandex-market-parser:
-        condition: service_healthy
     environment:
       APP_NAME: collector-service
-      SERVER_PORT: 8080
-      OZON_PARSER_URL: http://ozon-parser:8001/parse/ozon
-      YANDEX_MARKET_PARSER_URL: http://yandex-market-parser:8002/parse/yandex-market
-      SOURCE_TIMEOUT_SECONDS: ${SOURCE_TIMEOUT_SECONDS:-60}
+      APP_PORT: 8000
+      OZON_PARSER_URL: ${OZON_PARSER_URL:-http://ozon-parser:8001/parse/ozon}
+      YANDEX_MARKET_PARSER_URL: ${YANDEX_MARKET_PARSER_URL:-http://yandex-market-parser:8002/parse/yandex-market}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
     ports:
-      - "${COLLECTOR_SERVICE_PORT:-8090}:8080"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
+      - "${COLLECTOR_SERVICE_PORT:-8005}:8000"
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      catalog-service:
+        condition: service_started
+      collector-service:
+        condition: service_started
+      review-service:
+        condition: service_started
+      analysis-service:
+        condition: service_started
+      rating-service:
+        condition: service_started
+    environment:
+      APP_NAME: api-gateway
+      APP_PORT: 8000
+      CATALOG_SERVICE_URL: ${CATALOG_SERVICE_URL:-http://catalog-service:8000}
+      COLLECTOR_SERVICE_URL: ${COLLECTOR_SERVICE_URL:-http://collector-service:8000}
+      REVIEW_SERVICE_URL: ${REVIEW_SERVICE_URL:-http://review-service:8000}
+      ANALYSIS_SERVICE_URL: ${ANALYSIS_SERVICE_URL:-http://analysis-service:8000}
+      RATING_SERVICE_URL: ${RATING_SERVICE_URL:-http://rating-service:8000}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
+    ports:
+      - "${API_GATEWAY_PORT:-8000}:8000"
 
 volumes:
   postgres-data:

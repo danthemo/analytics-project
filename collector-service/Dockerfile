@@ -1,20 +1,16 @@
-FROM golang:1.22-alpine AS builder
+FROM python:3.11-slim
 
-WORKDIR /src
-
-COPY go.mod ./
-RUN go mod download
-
-COPY cmd ./cmd
-COPY internal ./internal
-
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/collector-service ./cmd/server
-
-FROM alpine:3.20
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY --from=builder /out/collector-service ./collector-service
 
-EXPOSE 8080
+COPY collector-service/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["./collector-service"]
+COPY collector-service/app /app/app
+COPY collector-service/parsers /app/parsers
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

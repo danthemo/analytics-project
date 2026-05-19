@@ -1,389 +1,221 @@
-# Intelligent Product Rating Platform
+# Reviews Platform
 
-Учебный микросервисный проект для анализа русскоязычных отзывов и формирования итоговых рейтингов товаров.
+Учебный проект микросервисной платформы для сбора отзывов, анализа тональности и расчета итогового рейтинга товара.
 
-## Стек и архитектура
+Текущая версия собрана вокруг минимального рабочего сценария:
 
-- `analysis-service` на Python 3.11, `FastAPI`, `Transformers`, `PyTorch`.
-- `rating-service` на Go 1.22, стандартный `net/http`, `GORM`, PostgreSQL driver.
-- `collector-service` на Go 1.22, агрегирует отзывы из `wildberries`, `ozon` и `yandex_market`.
-- `python` содержит исходные Playwright/FastAPI парсеры `main_ozon.py` и `ya_parse.py`, которые используются без изменения логики парсинга.
-- PostgreSQL 16 в отдельном Docker-контейнере.
-- Локальный запуск через `docker compose`.
-- Обучение модели выполняется отдельно скриптом `analysis-service/training/train.py`.
-- Analysis Service при старте только загружает готовую модель из `analysis-service/artifacts/model`.
-- Схема БД и все операции записи/чтения с PostgreSQL выполняются в `rating-service` через `GORM`.
-- `analysis-service` не подключается к БД и выполняет только inference по тексту.
-- Rating Service рассчитывает `R` и `BayesianRating`, где:
-  - `R = (N_pos * 5 + N_neu * 3 + N_neg * 1) / N`
-  - `BayesianRating = (C * m + N * R) / (C + N)`
-- `m` рассчитывается как глобальный средний рейтинг по всем уже проанализированным отзывам.
-- `C` рассчитывается как среднее число проанализированных отзывов на товар по всей выборке.
-- Итоговый рейтинг сохраняется в шкале `1..10`, линейно преобразованной из шкалы `1..5`.
+`создать товар -> собрать отзывы -> сохранить отзывы -> проанализировать отзывы -> посчитать рейтинг -> получить summary`
 
-## Структура проекта
+Существующие парсеры и inference-код не удалялись:
+
+- `analysis-service` по-прежнему использует существующую BERT/RuBERT-модель.
+- старые Python-парсеры `python/main_ozon.py` и `python/ya_parse.py` используются как внешние parser services для `collector-service`;
+- старые Go-реализации `collector-service` и `rating-service` сохранены в репозитории как legacy-код, но основной `docker-compose.yml` поднимает новую минимальную FastAPI-схему.
+
+## Микросервисы
+
+- `api-gateway`:
+  единая точка входа для клиента и orchestration end-to-end сценария.
+- `catalog-service`:
+  хранение и получение товаров.
+- `collector-service`:
+  сбор отзывов в унифицированный формат.
+  Для `wildberries` работает напрямую через search + feedbacks API.
+  Для `ozon` и `yandex_market` умеет использовать существующие parser services как HTTP-обертки.
+- `review-service`:
+  сохранение отзывов, получение отзывов товара, дедупликация.
+- `analysis-service`:
+  inference по одному отзыву и пакетный анализ отзывов товара.
+- `rating-service`:
+  расчет итогового рейтинга по результатам анализа тональности.
+- `postgres`:
+  общая база данных для учебного проекта.
+
+## Структура
 
 ```text
 .
-├── .env.example
-├── .gitignore
-├── README.md
+├── api-gateway/
+├── analysis-service/
+├── catalog-service/
+├── collector-service/
+├── review-service/
+├── rating-service/
+├── python/
+├── shared/
 ├── docker-compose.yml
-├── collector-service
-│   ├── Dockerfile
-│   ├── cmd
-│   │   └── server
-│   │       └── main.go
-│   ├── go.mod
-│   └── internal
-│       ├── collector
-│       ├── config
-│       ├── http
-│       └── sources
-├── python
-│   ├── main_ozon.py
-│   ├── ya_parse.py
-│   └── requirements.txt
-├── analysis-service
-│   ├── .dockerignore
-│   ├── Dockerfile
-│   ├── artifacts
-│   │   └── .gitkeep
-│   ├── app
-│   │   ├── __init__.py
-│   │   ├── config.py
-│   │   ├── main.py
-│   │   ├── model.py
-│   │   ├── preprocessing.py
-│   │   └── schemas.py
-│   ├── requirements.txt
-│   └── training
-│       └── train.py
-└── rating-service
-    ├── .dockerignore
-    ├── Dockerfile
-    ├── cmd
-    │   └── rating
-    │       └── main.go
-    ├── go.mod
-    ├── go.sum
-    └── internal
-        ├── analysis
-        │   └── client.go
-        ├── config
-        │   └── config.go
-        ├── db
-        │   ├── models.go
-        │   └── store.go
-        ├── domain
-        │   └── models.go
-        ├── httpapi
-        │   └── handlers.go
-        └── service
-            └── rating.go
+├── .env.example
+└── README.md
 ```
 
-## 1. Подготовка окружения
+`shared/` содержит общие SQLAlchemy-модели и инициализацию PostgreSQL, чтобы все Python-сервисы работали с одной схемой БД.
 
-Скопируйте переменные окружения:
+## Схема БД
+
+Используются таблицы:
+
+- `products`
+- `reviews`
+- `review_analysis`
+- `ratings`
+
+Для дедупликации отзывов в `reviews` добавлен внутренний `dedupe_key`:
+
+- если есть `marketplace_review_id`, используется он;
+- если его нет, используется hash текста отзыва.
+
+## API Gateway
+
+Основные endpoint’ы:
+
+- `POST /products`
+- `GET /products/{product_id}`
+- `POST /products/{product_id}/collect`
+- `POST /products/{product_id}/analyze`
+- `POST /products/{product_id}/rating`
+- `GET /products/{product_id}/summary`
+
+## Analysis Service
+
+Сохранился старый endpoint:
+
+- `POST /api/v1/analyze`
+
+Добавлены endpoint’ы интеграции:
+
+- `POST /analyze/review`
+- `POST /analyze/product/{product_id}?force=false`
+
+## Rating Service
+
+Формула расчета вынесена в:
+
+[`rating-service/app/domain/rating_calculator.py`](/Users/danzemeow/Documents/Studies/2%20семестр/sem_project/rating-service/app/domain/rating_calculator.py)
+
+Используется метод:
+
+```text
+P = positive_count
+N = neutral_count
+G = negative_count
+T = total_reviews
+
+sentiment_score = (P + 0.5 * N) / T
+bayesian_score = (T / (T + m)) * sentiment_score + (m / (T + m)) * C
+final_rating = 1 + 4 * bayesian_score
+```
+
+Где по умолчанию:
+
+- `m = 20`
+- `C = 0.5`
+
+Интерпретация классов:
+
+- `positive = 1`
+- `neutral = 0.5`
+- `negative = 0`
+
+## Запуск
 
 ```bash
 cp .env.example .env
-```
-
-## 2. Обучение модели
-
-Обучение выполняется вне микросервиса. Нужен CSV-файл формата:
-
-```csv
-text,label,src
-Очень хороший товар,1,site_a
-Обычное качество,0,site_b
-Плохо работает,2,site_c
-```
-
-Маппинг меток жестко зафиксирован:
-
-- `0 -> neutral`
-- `1 -> positive`
-- `2 -> negative`
-
-локально через Python
-
-```bash
-cd analysis-service
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python training/train.py --data-path "C:\Users\danth\Documents\LocalProjects\sentiment_dataset.csv" --output-dir artifacts/model --epochs 5 --batch-size 8 --eval-batch-size 16 --gradient-accumulation-steps 6 --learning-rate 2e-5 --warmup-ratio 0.06 --max-length 512 --label-smoothing 0.0 --early-stopping-patience 4
-```
-
-После выполнения обученная модель и токенизатор будут лежать в:
-
-```text
-analysis-service/artifacts/model
-```
-
-- mixed precision автоматически включается на CUDA;
-- включен cosine scheduler с warmup;
-- включен gradient checkpointing;
-- checkpoint и валидация выполняются несколько раз за эпоху, а не только в конце;
-- лучшая модель выбирается по `macro F1`;
-- есть early stopping;
-- есть weighted loss для более устойчивой работы при дисбалансе классов.
-
-Продолжение обучения с последнего checkpoint:
-
-```bash
-python training/train.py --data-path /absolute/path/to/dataset.csv --output-dir artifacts/model --resume-from-latest
-```
-
-[Обученная модель](https://drive.google.com/drive/folders/1WsYNUQX5_EES5zKNpJnGMhkHeOn77zUb?usp=sharing)
-
-## 3. Запуск сервисов
-
-Из корня проекта:
-
-```bash
 docker compose up --build
 ```
 
-Контейнеры:
+Этого достаточно для минимального end-to-end сценария через `wildberries`.
 
-- `postgres`
-- `analysis-service`
-- `rating-service`
-- `ozon-parser`
-- `yandex-market-parser`
-- `collector-service`
+Если нужно поднять старые Playwright-парсеры для `ozon` и `yandex_market`, используйте отдельный профиль:
 
-`rating-service` при старте сам выполняет `GORM AutoMigrate` и создает таблицы, если их еще нет.
-`collector-service` ходит к parser services внутри docker-сети по именам контейнеров.
+```bash
+docker compose --profile parsers up --build
+```
 
-## 4. Проверка API
+## Пример сценария использования
 
-### Health-check
+Создать товар:
+
+```bash
+curl -X POST http://localhost:8000/products \
+  -H "Content-Type: application/json" \
+  -d '{"marketplace":"wildberries","title":"руль игровой","url":null,"marketplace_product_id":null}'
+```
+
+Собрать и сохранить отзывы:
+
+```bash
+curl -X POST http://localhost:8000/products/1/collect
+```
+
+Проанализировать отзывы:
+
+```bash
+curl -X POST http://localhost:8000/products/1/analyze
+```
+
+Посчитать рейтинг:
+
+```bash
+curl -X POST http://localhost:8000/products/1/rating
+```
+
+Получить summary:
+
+```bash
+curl http://localhost:8000/products/1/summary
+```
+
+Пример summary:
+
+```json
+{
+  "product": {
+    "id": 1,
+    "marketplace": "wildberries",
+    "marketplace_product_id": null,
+    "title": "руль игровой",
+    "url": null
+  },
+  "reviews_count": 123,
+  "sentiment": {
+    "positive": 80,
+    "neutral": 25,
+    "negative": 18
+  },
+  "rating": {
+    "sentiment_score": 0.752,
+    "bayesian_score": 0.711,
+    "final_rating": 3.844
+  }
+}
+```
+
+## Health-check
 
 ```bash
 curl http://localhost:8000/health
-curl http://localhost:8080/health
-curl http://localhost:8090/health
+curl http://localhost:8001/health
+curl http://localhost:8002/health
+curl http://localhost:8003/health
+curl http://localhost:8004/health
+curl http://localhost:8005/health
 ```
 
-### Добавление тестовых данных в PostgreSQL
+## Что уже сделано
 
-```bash
-docker exec -i postgres psql -U postgres -d market_ratings <<'SQL'
-INSERT INTO products (name, category, brand, description)
-VALUES ('Смартфон X', 'electronics', 'DemoBrand', 'Учебный товар')
-ON CONFLICT DO NOTHING;
+- собран минимальный HTTP workflow между сервисами;
+- добавлена общая PostgreSQL-схема;
+- настроена дедупликация отзывов;
+- `analysis-service` интегрирован в общую цепочку;
+- расчет рейтинга вынесен в отдельную чистую функцию;
+- старые Python-парсеры подключены как адаптеры, а не переписаны;
+- parser services вынесены в опциональный compose-профиль, чтобы не блокировать базовый запуск.
 
-INSERT INTO reviews (product_id, author_name, review_text, review_date, source_name, rating_original)
-VALUES
-  (1, 'Ирина', 'Отличный смартфон, быстрый и удобный.', '2026-04-18', 'otzovik', 5.0),
-  (1, 'Павел', 'Нормальный аппарат, но батарея средняя.', '2026-04-18', 'market', 3.0),
-  (1, 'Олег', 'Камера слабая, цена завышена.', '2026-04-18', 'irecommend', 2.0);
-SQL
-```
+## TODO
 
-### Inference по произвольному тексту
-
-```bash
-curl -X POST http://localhost:8000/api/v1/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Качество хорошее, покупкой очень доволен"}'
-```
-
-### Анализ конкретного отзыва из БД и сохранение результата
-
-Этот сценарий теперь выполняет `rating-service`: он читает отзыв из PostgreSQL через `GORM`, отправляет текст в `analysis-service`, а затем сохраняет `analysis_results` обратно в БД.
-
-```bash
-curl -X POST http://localhost:8080/api/v1/reviews/1/analyze
-curl -X POST http://localhost:8080/api/v1/reviews/2/analyze
-curl -X POST http://localhost:8080/api/v1/reviews/3/analyze
-```
-
-### Пересчет рейтинга товара
-
-```bash
-curl -X POST http://localhost:8080/api/v1/products/1/rating/recalculate
-```
-
-### Получение сохраненного рейтинга и summary
-
-```bash
-curl http://localhost:8080/api/v1/products/1/rating
-```
-
-### Пересчет рейтингов для всех товаров
-
-```bash
-curl -X POST http://localhost:8080/api/v1/ratings/recalculate-all
-```
-
-## 5. Что делает каждый сервис
-
-### Analysis Service
-
-- Загружает обученную BERT-based модель при старте.
-- Выполняет только inference.
-- Умеет:
-  - анализировать произвольный текст.
-
-### Rating Service
-
-- Является владельцем схемы PostgreSQL через `GORM AutoMigrate`.
-- Читает и записывает данные в PostgreSQL только через `GORM`.
-- Считывает проанализированные отзывы из PostgreSQL.
-- Получает inference из `analysis-service` по HTTP.
-- Считает:
-  - `N_pos`, `N_neu`, `N_neg`
-  - локальный рейтинг `R`
-  - глобальное среднее `m`
-  - коэффициент сглаживания `C`
-  - итоговый `BayesianRating`
-- Генерирует:
-  - `summary_text`
-  - `pros_text`
-  - `cons_text`
-- Сохраняет результаты в:
-  - `product_ratings`
-  - `product_summaries`
-
-## 6. Основные endpoints
-
-### Analysis Service
-
-- `GET /health`
-- `POST /api/v1/analyze`
-
-### Rating Service
-
-- `GET /health`
-- `POST /api/v1/reviews/{review_id}/analyze`
-- `GET /api/v1/products/{product_id}/rating`
-- `POST /api/v1/products/{product_id}/rating/recalculate`
-- `POST /api/v1/ratings/recalculate-all`
-
-## 7. Collector Service и парсеры отзывов
-
-`collector-service` является отдельным Go-агрегатором с endpoint `POST /collect/reviews`. Он:
-
-- параллельно запускает источники `wildberries`, `ozon`, `yandex_market`;
-- ходит в `wildberries` напрямую по HTTP API;
-- вызывает `python/main_ozon.py` и `python/ya_parse.py` по HTTP как отдельные parser services;
-- фильтрует пустые и мусорные строки, а также удаляет дубли по `source + normalized text`.
-
-Важно: исходные файлы `python/main_ozon.py` и `python/ya_parse.py` не меняются и используются как есть.
-
-### 7.1. Docker-режим
-
-Все сервисы уже разнесены по отдельным контейнерам в `docker-compose.yml`.
-
-Порты на хосте по умолчанию:
-
-- `analysis-service`: `8000`
-- `rating-service`: `8080`
-- `collector-service`: `8090`
-- `ozon-parser`: `8001`
-- `yandex-market-parser`: `8002`
-
-Запуск:
-
-```bash
-docker compose up --build
-```
-
-Проверка collector:
-
-```bash
-curl -X POST http://localhost:8090/collect/reviews \
-  -H "Content-Type: application/json" \
-  -d '{"query":"игровой руль","sources":["wildberries","ozon","yandex_market"]}'
-```
-
-### 7.2. Локальный запуск parser services вне Docker
-
-```bash
-cd python
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m playwright install chromium
-```
-
-### 7.3. Запуск Ozon parser service
-
-```bash
-cd python
-source .venv/bin/activate
-uvicorn main_ozon:app --host 0.0.0.0 --port 8001
-```
-
-Endpoint:
-
-- `POST http://localhost:8001/parse/ozon`
-
-### 7.4. Запуск Yandex Market parser service
-
-`ya_parse.py` в исходном файле при прямом запуске использует порт `8000`, поэтому для совместимости с агрегатором лучше поднимать его через `uvicorn` на `8002`, не меняя сам файл:
-
-```bash
-cd python
-source .venv/bin/activate
-uvicorn ya_parse:app --host 0.0.0.0 --port 8002
-```
-
-Endpoint:
-
-- `POST http://localhost:8002/parse/yandex-market`
-
-### 7.5. Запуск Go Collector Service вне Docker
-
-```bash
-cd collector-service
-SERVER_PORT=8080 \
-OZON_PARSER_URL=http://localhost:8001/parse/ozon \
-YANDEX_MARKET_PARSER_URL=http://localhost:8002/parse/yandex-market \
-SOURCE_TIMEOUT_SECONDS=60 \
-go run ./cmd/server
-```
-
-Если у вас уже запущен `rating-service` на `8080`, запустите collector на другом порту, например `SERVER_PORT=8090`.
-
-Health-check:
-
-```bash
-curl http://localhost:8080/health
-```
-
-### 7.6. Проверка collector через curl
-
-```bash
-curl -X POST http://localhost:8080/collect/reviews \
-  -H "Content-Type: application/json" \
-  -d '{"query":"игровой руль","sources":["wildberries","ozon","yandex_market"]}'
-```
-
-Если поле `sources` не передавать или передать пустой массив, collector использует все три источника по умолчанию.
-
-Пример без списка источников:
-
-```bash
-curl -X POST http://localhost:8080/collect/reviews \
-  -H "Content-Type: application/json" \
-  -d '{"query":"игровой руль"}'
-```
-
-### 7.7. Доступные env-переменные
-
-- `ANALYSIS_SERVICE_PORT`, default `8000`
-- `RATING_SERVICE_PORT`, default `8080`
-- `COLLECTOR_SERVICE_PORT`, default `8090`
-- `OZON_PARSER_PORT`, default `8001`
-- `YANDEX_MARKET_PARSER_PORT`, default `8002`
-- `SERVER_PORT`, default `8080` for local non-docker collector run
-- `OZON_PARSER_URL`, default `http://localhost:8001/parse/ozon` for local non-docker collector run
-- `YANDEX_MARKET_PARSER_URL`, default `http://localhost:8002/parse/yandex-market` for local non-docker collector run
-- `SOURCE_TIMEOUT_SECONDS`, default `60`
+- добавить более устойчивые retry/backoff для внешних запросов к маркетплейсам;
+- расширить collector-service для более точной нормализации `marketplace_review_id`, автора и даты по разным источникам;
+- добавить batch insert и более эффективную пакетную запись анализа;
+- покрыть сервисы тестами;
+- при необходимости разнести схемы БД по отдельным сервисам;
+- добавить новые маркетплейсы, аспектный анализ, frontend и очереди.

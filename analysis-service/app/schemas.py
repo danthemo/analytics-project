@@ -13,10 +13,20 @@ class AnalyzeTextResponse(BaseModel):
 
 class AnalyzeReviewResponse(BaseModel):
     review_id: int
-    review_text: str
-    sentiment_class: str
+    sentiment: str
     confidence: float
-    probabilities: dict[str, float]
+
+
+class AnalyzeReviewRequest(BaseModel):
+    review_id: int
+    text: str = Field(..., min_length=1, max_length=5000)
+
+
+class AnalyzeProductResponse(BaseModel):
+    product_id: int
+    analyzed: int
+    skipped: int
+    results: list[AnalyzeReviewResponse]
 
 
 class HealthResponse(BaseModel):
