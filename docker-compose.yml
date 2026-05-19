@@ -30,6 +30,11 @@ services:
       - "${ANALYSIS_SERVICE_PORT:-8000}:8000"
     volumes:
       - ./analysis-service/artifacts:/app/artifacts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   rating-service:
     build:
@@ -40,7 +45,7 @@ services:
       postgres:
         condition: service_healthy
       analysis-service:
-        condition: service_started
+        condition: service_healthy
     environment:
       APP_NAME: rating-service
       HTTP_PORT: 8080
@@ -53,6 +58,67 @@ services:
       DB_SSLMODE: disable
     ports:
       - "${RATING_SERVICE_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  ozon-parser:
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+    container_name: ozon-parser
+    restart: unless-stopped
+    shm_size: "1gb"
+    command: ["xvfb-run", "-a", "uvicorn", "main_ozon:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "${OZON_PARSER_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/openapi.json', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  yandex-market-parser:
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+    container_name: yandex-market-parser
+    restart: unless-stopped
+    shm_size: "1gb"
+    command: ["uvicorn", "ya_parse:app", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "${YANDEX_MARKET_PARSER_PORT:-8002}:8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/openapi.json', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  collector-service:
+    build:
+      context: ./collector-service
+    container_name: collector-service
+    restart: unless-stopped
+    depends_on:
+      ozon-parser:
+        condition: service_healthy
+      yandex-market-parser:
+        condition: service_healthy
+    environment:
+      APP_NAME: collector-service
+      SERVER_PORT: 8080
+      OZON_PARSER_URL: http://ozon-parser:8001/parse/ozon
+      YANDEX_MARKET_PARSER_URL: http://yandex-market-parser:8002/parse/yandex-market
+      SOURCE_TIMEOUT_SECONDS: ${SOURCE_TIMEOUT_SECONDS:-60}
+    ports:
+      - "${COLLECTOR_SERVICE_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres-data:
