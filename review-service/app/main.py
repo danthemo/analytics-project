@@ -5,7 +5,7 @@ import logging
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import exists
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from shared.database import get_db
 from shared.init_db import init_db
@@ -104,12 +104,16 @@ def get_product_reviews(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    query = db.query(Review).filter(Review.product_id == product_id)
+    query = db.query(Review).options(joinedload(Review.analysis)).filter(Review.product_id == product_id)
     if exclude_analyzed:
         query = query.filter(~exists().where(ReviewAnalysis.review_id == Review.id))
 
     reviews = query.order_by(Review.id.asc()).all()
-    return ProductReviewsResponse(product_id=product_id, count=len(reviews), reviews=reviews)
+    return ProductReviewsResponse(
+        product_id=product_id,
+        count=len(reviews),
+        reviews=[_to_review_response(review) for review in reviews],
+    )
 
 
 @app.get("/reviews/{review_id}", response_model=ReviewResponse)
@@ -118,3 +122,19 @@ def get_review(review_id: int, db: Session = Depends(get_db)) -> Review:
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
     return review
+
+
+def _to_review_response(review: Review) -> ReviewResponse:
+    return ReviewResponse(
+        id=review.id,
+        product_id=review.product_id,
+        marketplace_review_id=review.marketplace_review_id,
+        text=review.text,
+        author=review.author,
+        source=review.source,
+        marketplace_rating=review.marketplace_rating,
+        published_at=review.published_at,
+        created_at=review.created_at,
+        sentiment=review.analysis.sentiment if review.analysis else None,
+        confidence=review.analysis.confidence if review.analysis else None,
+    )

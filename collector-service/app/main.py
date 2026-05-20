@@ -47,7 +47,10 @@ async def collect_reviews(payload: CollectRequest) -> CollectResponse:
             reviews = await _collect_single_marketplace(payload, marketplace)
         except httpx.HTTPStatusError as exc:  # type: ignore[name-defined]
             logger.exception("collector upstream error")
-            raise HTTPException(status_code=502, detail=f"Collector upstream error: {exc.response.status_code}") from exc
+            raise HTTPException(
+                status_code=502,
+                detail=_format_upstream_error(exc),
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
@@ -113,7 +116,7 @@ async def _collect_marketplace_result(
         return marketplace, reviews, None
     except httpx.HTTPStatusError as exc:  # type: ignore[name-defined]
         logger.exception("collector upstream error for marketplace=%s", marketplace)
-        return marketplace, [], f"upstream error: {exc.response.status_code}"
+        return marketplace, [], _format_upstream_error(exc)
     except ValueError as exc:
         return marketplace, [], str(exc)
     except Exception as exc:  # noqa: BLE001
@@ -150,3 +153,18 @@ def _resolve_marketplaces(raw_marketplace: str) -> list[str]:
     if marketplace in {"yandex", "yandex_market", "yandex-market"}:
         return ["yandex_market"]
     return []
+
+
+def _format_upstream_error(exc: httpx.HTTPStatusError) -> str:
+    status_code = exc.response.status_code
+    detail = ""
+    try:
+        payload = exc.response.json()
+        if isinstance(payload, dict):
+            detail = str(payload.get("detail") or payload.get("error") or "")
+    except ValueError:
+        detail = exc.response.text.strip()
+
+    if detail:
+        return f"upstream error {status_code}: {detail}"
+    return f"upstream error {status_code}"

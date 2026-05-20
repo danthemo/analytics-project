@@ -31,6 +31,8 @@ class ReviewResponse(BaseModel):
     marketplace_rating: int | None
     published_at: datetime | None
     created_at: datetime
+    sentiment: str | None = None
+    confidence: float | None = None
 
 
 class BulkReviewsResponse(BaseModel):

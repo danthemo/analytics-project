@@ -18,7 +18,7 @@ class Settings(BaseModel):
     review_service_url: str = _env("REVIEW_SERVICE_URL", "http://review-service:8000")
     analysis_service_url: str = _env("ANALYSIS_SERVICE_URL", "http://analysis-service:8000")
     rating_service_url: str = _env("RATING_SERVICE_URL", "http://rating-service:8000")
-    request_timeout_seconds: float = float(_env("REQUEST_TIMEOUT_SECONDS", "30"))
+    request_timeout_seconds: float = float(_env("API_GATEWAY_REQUEST_TIMEOUT_SECONDS", _env("REQUEST_TIMEOUT_SECONDS", "300")))
 
 
 settings = Settings()

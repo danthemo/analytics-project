@@ -143,7 +143,7 @@ services:
       APP_PORT: 8000
       OZON_PARSER_URL: ${OZON_PARSER_URL:-http://ozon-parser:8001/parse/ozon}
       YANDEX_MARKET_PARSER_URL: ${YANDEX_MARKET_PARSER_URL:-http://yandex-market-parser:8002/parse/yandex-market}
-      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
+      COLLECTOR_REQUEST_TIMEOUT_SECONDS: ${COLLECTOR_REQUEST_TIMEOUT_SECONDS:-240}
     ports:
       - "${COLLECTOR_SERVICE_PORT:-8005}:8000"
 
@@ -171,9 +171,24 @@ services:
       REVIEW_SERVICE_URL: ${REVIEW_SERVICE_URL:-http://review-service:8000}
       ANALYSIS_SERVICE_URL: ${ANALYSIS_SERVICE_URL:-http://analysis-service:8000}
       RATING_SERVICE_URL: ${RATING_SERVICE_URL:-http://rating-service:8000}
-      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
+      API_GATEWAY_REQUEST_TIMEOUT_SECONDS: ${API_GATEWAY_REQUEST_TIMEOUT_SECONDS:-300}
     ports:
       - "${API_GATEWAY_PORT:-8000}:8000"
+
+  frontend-service:
+    build:
+      context: .
+      dockerfile: frontend-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_started
+    environment:
+      VITE_USE_MOCK_API: ${VITE_USE_MOCK_API:-false}
+      VITE_API_PREFIX: ${VITE_API_PREFIX:-/api}
+      VITE_API_PROXY_TARGET: ${VITE_API_PROXY_TARGET:-http://api-gateway:8000}
+    ports:
+      - "${FRONTEND_SERVICE_PORT:-5173}:5173"
 
 volumes:
   postgres-data:

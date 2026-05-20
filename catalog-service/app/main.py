@@ -54,3 +54,15 @@ def get_product(product_id: int, db: Session = Depends(get_db)) -> Product:
 @app.get("/products", response_model=list[ProductResponse])
 def list_products(db: Session = Depends(get_db)) -> list[Product]:
     return db.query(Product).order_by(Product.id.desc()).all()
+
+
+@app.delete("/products/{product_id}")
+def delete_product(product_id: int, db: Session = Depends(get_db)) -> dict:
+    product = db.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    db.delete(product)
+    db.commit()
+    logger.info("deleted product id=%s", product_id)
+    return {"status": "deleted", "product_id": product_id}

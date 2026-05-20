@@ -12,6 +12,10 @@ class ProductCreate(BaseModel):
     marketplace_product_id: str | None = None
 
 
+class ProductAnalyzeRequest(BaseModel):
+    name: str
+
+
 class SummaryResponse(BaseModel):
     product: dict[str, Any]
     reviews_count: int

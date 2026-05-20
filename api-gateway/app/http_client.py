@@ -17,6 +17,9 @@ class ServiceClient:
     def post(self, path: str, json: dict[str, Any] | None = None, params: dict[str, Any] | None = None) -> Any:
         return self._request("POST", path, json=json, params=params)
 
+    def delete(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        return self._request("DELETE", path, params=params)
+
     def _request(
         self,
         method: str,
@@ -27,6 +30,11 @@ class ServiceClient:
         try:
             with httpx.Client(base_url=self.base_url, timeout=self.timeout_seconds) as client:
                 response = client.request(method, path, json=json, params=params)
+        except httpx.TimeoutException as exc:
+            raise HTTPException(
+                status_code=504,
+                detail=f"Upstream request timed out: {self.base_url}",
+            ) from exc
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Upstream service unavailable: {self.base_url}") from exc
 
