@@ -107,10 +107,9 @@ services:
     build:
       context: .
       dockerfile: python/Dockerfile
-    profiles: ["parsers"]
     restart: unless-stopped
     shm_size: "1gb"
-    command: ["xvfb-run", "-a", "uvicorn", "main_ozon:app", "--host", "0.0.0.0", "--port", "8001"]
+    command: ["uvicorn", "main_ozon:app", "--host", "0.0.0.0", "--port", "8001"]
     ports:
       - "${OZON_PARSER_PORT:-8006}:8001"
     healthcheck:
@@ -123,7 +122,6 @@ services:
     build:
       context: .
       dockerfile: python/Dockerfile
-    profiles: ["parsers"]
     restart: unless-stopped
     shm_size: "1gb"
     command: ["uvicorn", "ya_parse:app", "--host", "0.0.0.0", "--port", "8002"]

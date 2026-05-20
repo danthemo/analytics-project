@@ -25,6 +25,9 @@ class NormalizedReview(BaseModel):
 class CollectResponse(BaseModel):
     product_id: int
     collected: int
+    requested_marketplaces: list[str]
+    completed_marketplaces: list[str]
+    failed_marketplaces: dict[str, str] = Field(default_factory=dict)
     reviews: list[NormalizedReview]
 
 
