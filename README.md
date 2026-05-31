@@ -6,12 +6,6 @@
 
 `создать товар -> собрать отзывы -> сохранить отзывы -> проанализировать отзывы -> посчитать рейтинг -> получить summary`
 
-Существующие парсеры и inference-код не удалялись:
-
-- `analysis-service` по-прежнему использует существующую BERT/RuBERT-модель.
-- старые Python-парсеры `python/main_ozon.py` и `python/ya_parse.py` используются как внешние parser services для `collector-service`;
-- старые Go-реализации `collector-service` и `rating-service` сохранены в репозитории как legacy-код, но основной `docker-compose.yml` поднимает новую минимальную FastAPI-схему.
-
 ## Микросервисы
 
 - `api-gateway`:
@@ -75,12 +69,6 @@
 - `POST /products/{product_id}/rating`
 - `GET /products/{product_id}/summary`
 
-## Analysis Service
-
-Сохранился старый endpoint:
-
-- `POST /api/v1/analyze`
-
 Добавлены endpoint’ы интеграции:
 
 - `POST /analyze/review`
@@ -121,14 +109,6 @@ final_rating = 1 + 4 * bayesian_score
 ```bash
 cp .env.example .env
 docker compose up --build
-```
-
-Этого достаточно для минимального end-to-end сценария через `wildberries`.
-
-Если нужно поднять старые Playwright-парсеры для `ozon` и `yandex_market`, используйте отдельный профиль:
-
-```bash
-docker compose --profile parsers up --build
 ```
 
 ## Пример сценария использования
